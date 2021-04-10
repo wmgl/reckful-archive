@@ -23,39 +23,33 @@ using Stream stream = await response.Content.ReadAsStreamAsync();
 using IBrowsingContext browsingContext = BrowsingContext.New();
 using IDocument document = await browsingContext.OpenAsync(m => m.Content(stream));
 
-IList<IElement> streamElements = document
+static string Duration(string title)
+{
+    return title[(title.LastIndexOf("(") + 1)..(title.LastIndexOf(")") - 1)];
+}
+
+IList<IGrouping<string, IElement>> streamElements = document
     .QuerySelectorAll("body > div.ui.center.aligned.grid > div > div.ui.left.aligned.stacked.segment > a")
     .GroupBy(element => element.TextContent.Split(" ")[0], element => element)
     .FirstOrDefault(group => group.Key == streamDate)
+    .GroupBy(element => Duration(element.TextContent))
     .ToList();
 
 List<Vod> vods = new List<Vod>();
 
-DateTime? timestamp = null;
-string videoUrl = string.Empty;
-string thumbnailUrl = string.Empty;
-string infoUrl = string.Empty;
-
-foreach (IElement element in streamElements)
+foreach (IGrouping<string, IElement> group in streamElements)
 {
-    if (element.TextContent.EndsWith(".info.json"))
-    {
-        if (!string.IsNullOrWhiteSpace(infoUrl))
-        {
-            vods.Add(new(timestamp, videoUrl, thumbnailUrl, infoUrl));
-        }
+    IElement infoElement = group.First(element => element.TextContent.EndsWith(".info.json"));
+    string infoUrl = archiveUrl + infoElement.Attributes["href"].Value;
+    DateTime? timestamp = await GetTimestamp(infoUrl);
 
-        infoUrl = archiveUrl + element.Attributes["href"].Value;
-        timestamp = await GetTimestamp(infoUrl);
-    }
-    else if (element.TextContent.EndsWith(".jpg"))
-    {
-        thumbnailUrl = archiveUrl + element.Attributes["href"].Value;
-    }
-    else if (element.TextContent.EndsWith(".mp4"))
-    {
-        videoUrl = archiveUrl + element.Attributes["href"].Value;
-    }
+    IElement thumbnailElement = group.First(element => element.TextContent.EndsWith(".jpg"));
+    string thumbnailUrl = archiveUrl + thumbnailElement.Attributes["href"].Value;
+
+    IElement videoElement = group.First(element => element.TextContent.EndsWith(".mp4"));
+    string videoUrl = archiveUrl + videoElement.Attributes["href"].Value;
+
+    vods.Add(new(timestamp, videoUrl, thumbnailUrl, infoUrl));
 }
 
 Console.Out.WriteLine(JsonSerializer.Serialize(vods.OrderBy(vod => vod.Timestamp), new() { WriteIndented = true }));
